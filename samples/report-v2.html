@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI-Generated Report</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d0d0d; --surface: #1a1a1a; --border: #2a2a2a;
+    --accent: #e8ff00; --text: #e0e0e0; --muted: #666;
+    --mono: 'IBM Plex Mono', monospace; --body: 'Noto Sans JP', sans-serif;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--body); min-height: 100vh; padding: 2rem; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+  header h1 { font-family: var(--mono); font-size: 1.4rem; font-weight: 600; color: var(--accent); }
+  header p { font-size: 0.8rem; color: var(--muted); margin-top: 0.3rem; font-family: var(--mono); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1.25rem; }
+  .card-title { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1rem; }
+  .chart-container { width: 100%; height: 280px; }
+  .kpi-value { font-family: var(--mono); font-size: 2.5rem; font-weight: 600; color: var(--accent); line-height: 1; }
+  .kpi-label { font-size: 0.75rem; color: var(--muted); margin-top: 0.5rem; }
+  #status { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); margin-bottom: 1.5rem; }
+  #status.error { color: #ff4444; }
+  #status.ready { color: #44ff88; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Monthly Sales Report</h1>
+  <p>generated · 2026-05</p>
+</header>
+
+<div id="status">⏳ initializing...</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Total Revenue</div>
+    <div class="kpi-value" id="kpi-revenue">—</div>
+    <div class="kpi-label">全期間合計</div>
+  </div>
+  <div class="card" style="grid-column: span 2;">
+    <div class="card-title">Monthly Trend</div>
+    <div class="chart-container" id="chart-trend"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">By Category</div>
+    <div class="chart-container" id="chart-category"></div>
+  </div>
+</div>
+
+<script>
+function setStatus(msg, type = "") {
+  const el = document.getElementById("status");
+  el.textContent = msg;
+  el.className = type;
+}
+
+// ✅ 固定: SQL.js初期化
+async function initDB(csvText) {
+  const SQL = await initSqlJs({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/${f}`
+  });
+  const db = new SQL.Database();
+  const lines = csvText.trim().split("\n");
+  const headers = lines[0].split(",");
+  db.run(`CREATE TABLE sales (${headers.join(" TEXT, ")} TEXT)`);
+  const stmt = db.prepare(`INSERT INTO sales VALUES (${headers.map(() => "?").join(",")})`);
+  for (const line of lines.slice(1)) stmt.run(line.split(","));
+  stmt.free();
+  return db;
+}
+
+function runQuery(db, sql) {
+  const res = db.exec(sql);
+  if (!res.length) return [];
+  const { columns, values } = res[0];
+  return values.map(row => Object.fromEntries(columns.map((c, i) => [c, row[i]])));
+}
+
+// ⬇️ AIに書かせる: データ
+const RAW_DATA = `month,category,revenue
+2026-01,Food,120000
+2026-01,Tech,340000
+2026-02,Food,98000
+2026-02,Tech,410000
+2026-03,Food,154000
+2026-03,Tech,389000
+2026-04,Food,201000
+2026-04,Tech,455000
+2026-05,Food,178000
+2026-05,Tech,512000`;
+
+// ⬇️ AIに書かせる: クエリ
+const QUERIES = {
+  totalRevenue: `SELECT SUM(CAST(revenue AS INTEGER)) AS total FROM sales`,
+  monthlyTrend: `SELECT month, SUM(CAST(revenue AS INTEGER)) AS revenue FROM sales GROUP BY month ORDER BY month`,
+  byCategory:   `SELECT category, SUM(CAST(revenue AS INTEGER)) AS revenue FROM sales GROUP BY category`,
+};
+
+// ⬇️ AIに書かせる: チャート
+function renderTrend(rows) {
+  const chart = echarts.init(document.getElementById("chart-trend"), "dark");
+  chart.setOption({
+    backgroundColor: "transparent",
+    tooltip: { trigger: "axis" },
+    xAxis: { type: "value", splitLine: { lineStyle: { color: "#222" } } },
+    yAxis: { type: "category", data: rows.map(r => r.month), axisLine: { lineStyle: { color: "#444" } } },
+    series: [{ type: "bar", data: rows.map(r => Number(r.revenue)), itemStyle: { color: "#e8ff00" }, barMaxWidth: 40 }],
+  });
+}
+
+function renderCategory(rows) {
+  const chart = echarts.init(document.getElementById("chart-category"), "dark");
+  chart.setOption({
+    backgroundColor: "transparent",
+    tooltip: { trigger: "item" },
+    series: [{
+      type: "pie", radius: ["50%", "80%"],
+      data: rows.map(r => ({ name: r.category, value: Number(r.revenue) })),
+      label: { color: "#e0e0e0", fontSize: 11 },
+      itemStyle: { color: p => ["#e8ff00", "#00e8ff"][p.dataIndex % 2] },
+    }],
+  });
+}
+
+// ✅ 固定: メイン実行
+(async () => {
+  try {
+    setStatus("⏳ loading wasm...");
+    const db = await initDB(RAW_DATA);
+    setStatus("⏳ querying...");
+    const revenue  = runQuery(db, QUERIES.totalRevenue);
+    const trend    = runQuery(db, QUERIES.monthlyTrend);
+    const category = runQuery(db, QUERIES.byCategory);
+    document.getElementById("kpi-revenue").textContent =
+      "¥" + Number(revenue[0].total).toLocaleString("ja-JP");
+    renderTrend(trend);
+    renderCategory(category);
+    setStatus("✓ ready", "ready");
+    db.close();
+  } catch (e) {
+    setStatus("✗ error: " + e.message, "error");
+    console.error(e);
+  }
+})();
+</script>
+</body>
+</html>

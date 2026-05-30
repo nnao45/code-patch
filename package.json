@@ -25,7 +25,8 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "serve": "bun run server/index.ts"
   },
   "keywords": [
     "html",
