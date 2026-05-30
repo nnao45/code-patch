@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.tsbuildinfo
 .inspector-context.json
+.inspector-patch.txt
